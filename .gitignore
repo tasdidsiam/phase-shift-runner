@@ -1,0 +1,22 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code settings
+.vscode/
+
+# Node modules (future)
+node_modules/
+
+# Logs
+*.log
+
+# Environment files
+.env
+
+# Build folders
+dist/
+build/
+
+# Cache
+.cache/
