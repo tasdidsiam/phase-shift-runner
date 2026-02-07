@@ -1,10 +1,16 @@
 /************* CANVAS *************/
+const isMobile =
+  (window.matchMedia &&
+    window.matchMedia("(pointer: coarse)").matches) ||
+  Math.min(window.innerWidth, window.innerHeight) < 768;
+const mobileScale = isMobile ? 1.45 : 1;
 document.body.style.margin = 0;
 document.body.style.overflow = "hidden";
 document.body.style.background = "#000";
 
 const canvas = document.createElement("canvas");
 canvas.tabIndex = 0;
+canvas.style.touchAction = "none";
 document.body.appendChild(canvas);
 const ctx = canvas.getContext("2d");
 
@@ -24,18 +30,24 @@ let score = 0;
 let running = false;
 let gameOver = false;
 let paused = false;
-
 let shield = false;
 let shieldTimer = 0;
+let intro = true;
+let introAlpha = 0;
+let introTimer = 0;
+let gameFade = 0;
 
 let highScore = localStorage.getItem("phaseHighScore") || 0;
 
+const playerSize = isMobile ? 60 : 40;
 const player = {
-  x: 120,
+  x: isMobile ? 80 : 120,
   y: canvas.height / 2,
-  w: 40,
-  h: 75
+  size: playerSize,
+  w: Math.round(playerSize * mobileScale),
+  h: Math.round((isMobile ? 112 : 75) * mobileScale)
 };
+
 
 /************* UI *************/
 const overlay = document.createElement("div");
@@ -46,7 +58,12 @@ overlay.style.transform = "translate(-50%, -50%)";
 overlay.style.color = "white";
 overlay.style.textAlign = "center";
 overlay.style.maxWidth = "420px";
+overlay.style.display = "none";
 document.body.appendChild(overlay);
+if (isMobile) {
+  overlay.style.width = "90%";
+  overlay.style.fontSize = "20px";
+}
 
 
 /* PLAY BUTTON */
@@ -56,6 +73,11 @@ playBtn.style.padding = "15px 40px";
 playBtn.style.fontSize = "22px";
 playBtn.style.transition = "0.25s";
 overlay.appendChild(playBtn);
+
+if (isMobile) {
+  playBtn.style.fontSize = "28px";
+  playBtn.style.padding = "20px 60px";
+}
 
 playBtn.onmouseenter = () =>
   (playBtn.style.transform = "scale(1.1)");
@@ -73,10 +95,17 @@ info.innerHTML = `
 Avoid obstacles in wrong world.<br>
 Collect green orb for shield.<br><br>
 
-<b style="font-size:18px">CONTROLS</b><br>
-🟦 Space / Tap → Change world<br>
+<span style="opacity:0.9">Game by <span style="color:#7fd9ff; font-weight:700;">Tasdid Siam</span></span><br><br>
+
+<b style="font-size:18px">CONTROLS (DESKTOP)</b><br>
+🟦 Space → Change world<br>
+⬆/⬇ or W/S → Move<br>
 ⏸ P → Pause<br>
-🔊 M → Mute
+🔊 M → Mute<br><br>
+
+<b style="font-size:18px">CONTROLS (MOBILE)</b><br>
+🟦 Tap → Change world<br>
+Swipe/Drag → Move
 `;
 overlay.appendChild(info);
 
@@ -93,6 +122,12 @@ restartBtn.style.borderRadius = "50%";
 restartBtn.style.marginTop = "20px";
 restartBtn.style.display = "none";
 restartBtn.style.transition = "0.25s";
+
+if (isMobile) {
+  restartBtn.style.width = "200px";
+  restartBtn.style.height = "200px";
+  restartBtn.style.fontSize = "32px";
+}
 
 restartBtn.onmouseenter = () => {
   restartBtn.style.background = "white";
@@ -185,16 +220,32 @@ function gameOverSound() {
 }
 
 /************* CONTROLS *************/
-document.addEventListener("keydown", (e) => {
-  if (e.repeat) return;
+function movePlayer(deltaY) {
+  const nextY = player.y + deltaY;
+  player.y = Math.max(0, Math.min(canvas.height - player.h, nextY));
+}
 
+document.addEventListener("keydown", (e) => {
   const key = e.key.toLowerCase();
   const code = e.code;
+  const isMoveUp =
+    code === "ArrowUp" || code === "KeyW" || key === "w";
+  const isMoveDown =
+    code === "ArrowDown" || code === "KeyS" || key === "s";
+
+  if (e.repeat && !isMoveUp && !isMoveDown) return;
 
   if (code === "Space" || key === " ") {
     e.preventDefault();
     if (running && !paused) {
       dimension = dimension === "blue" ? "red" : "blue";
+    }
+  }
+
+  if (isMoveUp || isMoveDown) {
+    if (running && !paused) {
+      const step = Math.round(player.h * 0.6);
+      movePlayer(isMoveUp ? -step : step);
     }
   }
 
@@ -207,10 +258,63 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-canvas.addEventListener("touchstart", () => {
-  if (running)
-    dimension = dimension === "blue" ? "red" : "blue";
-});
+if (isMobile) {
+  const touchState = { x: 0, y: 0, startY: 0, t: 0 };
+  const tapDistance = 14;
+  const tapTime = 280;
+
+  canvas.addEventListener(
+    "touchstart",
+    (e) => {
+      e.preventDefault();
+      if (!e.touches || e.touches.length === 0) return;
+      const touch = e.touches[0];
+      touchState.x = touch.clientX;
+      touchState.y = touch.clientY;
+      touchState.startY = player.y;
+      touchState.t = Date.now();
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "touchmove",
+    (e) => {
+      e.preventDefault();
+      if (!running || paused || gameOver) return;
+      if (!e.touches || e.touches.length === 0) return;
+      const touch = e.touches[0];
+      const dragDelta = touch.clientY - touchState.y;
+      const targetY = touchState.startY + dragDelta;
+      player.y = Math.max(
+        0,
+        Math.min(canvas.height - player.h, targetY)
+      );
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "touchend",
+    (e) => {
+      e.preventDefault();
+      if (!running || paused || gameOver) return;
+      if (!e.changedTouches || e.changedTouches.length === 0) return;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchState.x;
+      const dy = touch.clientY - touchState.y;
+      const dt = Date.now() - touchState.t;
+      if (
+        Math.abs(dx) <= tapDistance &&
+        Math.abs(dy) <= tapDistance &&
+        dt <= tapTime
+      ) {
+        dimension = dimension === "blue" ? "red" : "blue";
+      }
+    },
+    { passive: false }
+  );
+}
 
 /************* SPAWN *************/
 setInterval(() => {
@@ -218,9 +322,9 @@ setInterval(() => {
 
   obstacles.push({
     x: canvas.width,
-    y: Math.random() * (canvas.height - 60),
-    w: 50,
-    h: 60,
+    y: Math.random() * (canvas.height - 60 * mobileScale),
+    w: Math.round(50 * mobileScale),
+    h: Math.round(60 * mobileScale),
     dim: Math.random() > 0.5 ? "blue" : "red"
   });
 }, 1100);
@@ -230,8 +334,8 @@ setInterval(() => {
 
   powerups.push({
     x: canvas.width,
-    y: Math.random() * (canvas.height - 40),
-    size: 20
+    y: Math.random() * (canvas.height - 40 * mobileScale),
+    size: Math.round(20 * mobileScale)
   });
 }, 7000);
 
@@ -240,6 +344,9 @@ let stars = Array(120).fill().map(() => ({
   x: Math.random() * canvas.width,
   y: Math.random() * canvas.height
 }));
+
+const introImage = new Image();
+introImage.src = "assets/images/intro.png";
 
 function drawStars() {
   ctx.fillStyle = "#ffffff22";
@@ -250,20 +357,126 @@ function drawStars() {
   });
 }
 
+function drawIntro() {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const introDelay = 12;
+  const introFadeIn = 55;
+  const introHold = 80;
+  const introFadeOut = 55;
+  const introTotal =
+    introDelay + introFadeIn + introHold + introFadeOut;
+
+  introTimer++;
+
+  const smootherStep = (t) =>
+    t * t * t * (t * (t * 6 - 15) + 10);
+
+  let alpha = 0;
+  let animScale = 0.92;
+  let yOffset = 30;
+
+  if (introTimer > introDelay) {
+    if (introTimer <= introDelay + introFadeIn) {
+      const p = (introTimer - introDelay) / introFadeIn;
+      const ep = smootherStep(p);
+      alpha = ep;
+      animScale = 0.92 + 0.08 * ep;
+      yOffset = 28 * (1 - ep);
+    } else if (introTimer <= introDelay + introFadeIn + introHold) {
+      alpha = 1;
+      animScale = 1;
+      yOffset = 0;
+    } else if (introTimer <= introTotal) {
+      const p =
+        (introTimer - introDelay - introFadeIn - introHold) /
+        introFadeOut;
+        const ep = smootherStep(p);
+        alpha = 1 - ep;
+        animScale = 1 + 0.02 * ep;
+        yOffset = -8 * ep;
+    }
+  }
+
+  const imgReady = introImage.complete && introImage.naturalWidth > 0;
+  if (imgReady) {
+    const maxW = Math.min(canvas.width * 0.7, 520);
+    const imgScale = maxW / introImage.naturalWidth;
+    const drawW = introImage.naturalWidth * imgScale;
+    const drawH = introImage.naturalHeight * imgScale;
+
+    const floatY = Math.sin(introTimer * 0.06) * 3;
+    const glowSize = Math.max(drawW, drawH) * 0.9;
+    const glow = ctx.createRadialGradient(
+      canvas.width / 2,
+      canvas.height / 2,
+      0,
+      canvas.width / 2,
+      canvas.height / 2,
+      glowSize
+    );
+    glow.addColorStop(0, `rgba(120,200,255,${0.18 * alpha})`);
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+
+    ctx.save();
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(
+      introImage,
+      canvas.width / 2 - (drawW * animScale) / 2,
+      canvas.height / 2 - (drawH * animScale) / 2 + yOffset + floatY,
+      drawW * animScale,
+      drawH * animScale
+    );
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "#7fd9ff";
+  ctx.textAlign = "center";
+  ctx.font = "bold 17px Arial";
+  ctx.fillText(
+    "A Game by Tasdid Siam",
+    canvas.width / 2,
+    canvas.height / 2 + 140
+  );
+  ctx.restore();
+
+  if (introTimer > introTotal) {
+    intro = false;
+    gameFade = 1;
+    overlay.style.display = "block";
+  }
+}
+
+
 function drawNavbar() {
   ctx.fillStyle = "white";
-  ctx.font = "18px Arial";
+  ctx.font = isMobile ? "26px Arial" : "18px Arial";
 
   const padding = 20;
 
   ctx.fillText("Score: " + score, padding, 30);
-  ctx.fillText("High: " + highScore, padding + 160, 30);
-  ctx.fillText("Speed: " + speed.toFixed(1), padding + 320, 30);
-  ctx.fillText("World: " + dimension, padding + 500, 30);
+  ctx.fillText("High: " + highScore, padding + 180, 30);
+  ctx.fillText("Speed: " + speed.toFixed(1), padding + 360, 30);
+  ctx.fillText("World: " + dimension, padding + 540, 30);
 }
 
 /************* LOOP *************/
 function loop() {
+
+  if (intro) {
+  drawIntro();
+  requestAnimationFrame(loop);
+  return;
+}
+
   ctx.fillStyle =
     dimension === "blue" ? "#001933" : "#330000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -275,10 +488,10 @@ function loop() {
     ctx.fillStyle = "white";
     ctx.font = "40px Arial";
     ctx.fillText(
-      "PAUSED",
-      canvas.width / 2 - 90,
-      canvas.height / 2
-    );
+  "PAUSED",
+  canvas.width / 2 - (isMobile ? 120 : 90),
+  canvas.height / 2
+);
   }
 
   if (running && !gameOver && !paused) {
@@ -352,6 +565,14 @@ function loop() {
   }
 
   drawNavbar();
+
+  if (gameFade > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(0, 0, 0, ${gameFade})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    gameFade = Math.max(0, gameFade - 0.03);
+  }
 
   requestAnimationFrame(loop);
 }
